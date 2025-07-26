@@ -2,96 +2,100 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
-st.title("🔁 Cascade CNG Simulation: 1 Vehicle | LP → MP → HP")
+st.title("🔁 CNG Cascade Simulation – Vehicle Refill: LP → MP → HP")
 
-# --- Configuration
-P_nozzle_min = st.number_input("Target vehicle pressure (bar)", value=200.0)
-delta_p_min = st.number_input("Minimum ΔP to transfer (bar)", value=5.0)
+st.markdown("""
+Cette simulation montre le remplissage d’un véhicule avec une séquence de banques en cascade :
+- **Ordre LP → MP → HP**
+- Chaque banque remplit tant que la **différence de pression avec le véhicule est suffisante**
+- La pression du véhicule **augmente progressivement**
+- On visualise les pressions minute par minute.
+""")
 
-# Bank pressures
-P_LP_init = st.number_input("Initial LP pressure", value=100.0)
-P_MP_init = st.number_input("Initial MP pressure", value=150.0)
-P_HP_init = st.number_input("Initial HP pressure", value=250.0)
+# -------------------- Paramètres --------------------
+P_nozzle_min = st.number_input("🔻 Target vehicle pressure (bar)", value=200.0)
+delta_p_min = st.number_input("🔺 Minimum ΔP for transfer (bar)", value=5.0)
 
-# Bank volumes
-V_LP = st.number_input("LP buffer volume (m³)", value=2.0)
-V_MP = st.number_input("MP buffer volume (m³)", value=2.0)
-V_HP = st.number_input("HP buffer volume (m³)", value=2.0)
+# Pression initiale des banks
+P_LP = st.number_input("LP initial pressure", value=150.0)
+P_MP = st.number_input("MP initial pressure", value=250.0)
+P_HP = st.number_input("HP initial pressure", value=350.0)
 
-# Vehicle volume
-V_vehicle = st.number_input("Vehicle volume (m³)", value=0.3)
+# Volumes
+V_LP = st.number_input("LP volume (m³)", value=2.0)
+V_MP = st.number_input("MP volume (m³)", value=2.0)
+V_HP = st.number_input("HP volume (m³)", value=2.0)
+V_veh = st.number_input("Vehicle volume (m³)", value=0.3)
 
-# Step size for simulation
-step_time = 1  # minutes
-max_time = 30  # min
+# Simulation
+max_time = 30  # minutes
+step_time = 1  # minute
 
-if st.button("🚀 Run Simulation"):
+if st.button("🚀 Lancer la simulation"):
 
-    # Initialization
+    # Initialisation
+    P_vehicle = 1.0  # bar (atmosphérique)
     time_series = []
     P_vehicle_series = []
     P_LP_series = []
     P_MP_series = []
     P_HP_series = []
 
-    P_LP = P_LP_init
-    P_MP = P_MP_init
-    P_HP = P_HP_init
-    P_veh = 1.0  # bar atmospheric pressure
-
     i = 0
-    while i < max_time and P_veh < P_nozzle_min:
+    while i <= max_time and P_vehicle < P_nozzle_min:
 
-        current_bank = None
-        if P_LP - P_veh >= delta_p_min:
-            current_bank = "LP"
-        elif P_MP - P_veh >= delta_p_min:
-            current_bank = "MP"
-        elif P_HP - P_veh >= delta_p_min:
-            current_bank = "HP"
+        # Choix de la banque active selon la pression disponible
+        active_bank = None
+        if P_LP - P_vehicle >= delta_p_min:
+            active_bank = "LP"
+        elif P_MP - P_vehicle >= delta_p_min:
+            active_bank = "MP"
+        elif P_HP - P_vehicle >= delta_p_min:
+            active_bank = "HP"
         else:
-            st.warning("❌ No bank has enough pressure to continue filling.")
+            st.warning("❌ Aucune banque n’a suffisamment de pression pour continuer le remplissage.")
             break
 
-        # Gas transfer for this minute (simplified)
-        delta_p = 0
-        if current_bank == "LP":
-            delta_p = P_LP - P_veh
-            transferred = min(V_LP, (delta_p / P_LP) * V_LP * 0.05)
-            P_LP -= (transferred / V_LP) * P_LP
-        elif current_bank == "MP":
-            delta_p = P_MP - P_veh
-            transferred = min(V_MP, (delta_p / P_MP) * V_MP * 0.05)
-            P_MP -= (transferred / V_MP) * P_MP
-        elif current_bank == "HP":
-            delta_p = P_HP - P_veh
-            transferred = min(V_HP, (delta_p / P_HP) * V_HP * 0.05)
-            P_HP -= (transferred / V_HP) * P_HP
+        # Transfert de gaz selon la banque
+        transfer_volume = 0.0
+        if active_bank == "LP":
+            delta_P = P_LP - P_vehicle
+            transfer_volume = min((delta_P / P_LP) * V_LP * 0.05, V_LP)
+            P_LP -= (transfer_volume / V_LP) * P_LP
+        elif active_bank == "MP":
+            delta_P = P_MP - P_vehicle
+            transfer_volume = min((delta_P / P_MP) * V_MP * 0.05, V_MP)
+            P_MP -= (transfer_volume / V_MP) * P_MP
+        elif active_bank == "HP":
+            delta_P = P_HP - P_vehicle
+            transfer_volume = min((delta_P / P_HP) * V_HP * 0.05, V_HP)
+            P_HP -= (transfer_volume / V_HP) * P_HP
 
-        # Vehicle pressure rise (simplified)
-        if transferred > 0:
-            P_veh += (transferred / V_vehicle) * P_veh * 0.04
-            P_veh = min(P_veh, P_nozzle_min)
+        # Mise à jour de la pression véhicule
+        if transfer_volume > 0:
+            P_vehicle += (transfer_volume / V_veh) * P_vehicle * 0.04
+            P_vehicle = min(P_vehicle, P_nozzle_min)
 
-        # Log
+        # Enregistrer les valeurs pour le graphique
         time_series.append(i)
-        P_vehicle_series.append(P_veh)
+        P_vehicle_series.append(P_vehicle)
         P_LP_series.append(P_LP)
         P_MP_series.append(P_MP)
         P_HP_series.append(P_HP)
 
         i += step_time
 
-    # --- Plot
+    # -------------------- Graphique --------------------
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(time_series, P_vehicle_series, label="Vehicle")
-    ax.plot(time_series, P_LP_series, label="LP bank")
-    ax.plot(time_series, P_MP_series, label="MP bank")
-    ax.plot(time_series, P_HP_series, label="HP bank")
-    ax.set_xlabel("Time (min)")
-    ax.set_ylabel("Pressure (bar)")
-    ax.set_title("📈 Pressures during cascade refueling")
+    ax.plot(time_series, P_vehicle_series, label="🚐 Vehicle", color="blue")
+    ax.plot(time_series, P_LP_series, label="🟧 LP bank", color="orange")
+    ax.plot(time_series, P_MP_series, label="🟩 MP bank", color="green")
+    ax.plot(time_series, P_HP_series, label="🟥 HP bank", color="red")
+    ax.set_xlabel("Temps (min)")
+    ax.set_ylabel("Pression (bar)")
+    ax.set_title("📈 Évolution des pressions pendant le remplissage")
     ax.legend()
+    ax.grid(True)
     st.pyplot(fig)
 
-    st.success("✅ Simulation complete.")
+    st.success("✅ Simulation terminée.")
