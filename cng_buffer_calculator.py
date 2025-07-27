@@ -85,9 +85,7 @@ def export_pdf():
     pdf.cell(0, 10, f"MP Bank : {MP:.1f} Nm³", ln=True)
     pdf.cell(0, 10, f"HP Bank : {HP:.1f} Nm³", ln=True)
 
-    # Sauvegarde en mémoire
-    buf = io.BytesIO()
-    pdf.output(buf)
-    st.download_button("📥 Télécharger le PDF", buf.getvalue(), "cng_sizing_report.pdf", mime="application/pdf")
+    pdf_bytes = pdf.output(dest='S').encode('latin1')
+    st.download_button("📥 Télécharger le PDF", pdf_bytes, "cng_sizing_report.pdf", mime="application/pdf")
 
 export_pdf()
