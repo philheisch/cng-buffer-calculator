@@ -1,101 +1,93 @@
 import streamlit as st
 import matplotlib.pyplot as plt
+from fpdf import FPDF
+import io
 
-st.set_page_config(layout="wide")
-st.title("🔁 CNG Cascade Simulation – Vehicle Refill: LP → MP → HP")
+st.set_page_config(page_title="CNG Station Sizing", layout="centered")
 
-st.markdown("""
-Cette simulation montre le remplissage d’un véhicule avec une séquence de banques en cascade :
-- **Ordre LP → MP → HP**
-- Chaque banque remplit tant que la **différence de pression avec le véhicule est suffisante**
-- La pression du véhicule **augmente progressivement**
-- On visualise les pressions minute par minute.
-""")
+st.title("🚛 CNG Station Auto-Sizing Tool")
 
-# -------------------- Paramètres --------------------
-P_nozzle_min = st.number_input("🔻 Target vehicle pressure (bar)", value=200.0)
-delta_p_min = st.number_input("🔺 Minimum ΔP for transfer (bar)", value=5.0)
+st.markdown("Ce simulateur calcule automatiquement les besoins en buffers, compresseurs et nozzles à partir de quelques paramètres clés.")
 
-# Pression initiale des banks
-P_LP = st.number_input("LP initial pressure", value=150.0)
-P_MP = st.number_input("MP initial pressure", value=250.0)
-P_HP = st.number_input("HP initial pressure", value=350.0)
+st.header("🔧 Paramètres d'entrée")
 
-# Volumes
-V_LP = st.number_input("LP volume (m³)", value=2.0)
-V_MP = st.number_input("MP volume (m³)", value=2.0)
-V_HP = st.number_input("HP volume (m³)", value=2.0)
-V_veh = st.number_input("Vehicle volume (m³)", value=0.3)
+# Inputs
+nb_vehicules = st.number_input("Nombre de véhicules à remplir par heure", min_value=1, value=20)
+volume_litre_1bar = st.number_input("Volume moyen du réservoir à 1 bar (litres)", min_value=1, value=300)
+pression_depart = st.number_input("Pression moyenne de départ (bar)", min_value=1, value=30)
+pression_cible = st.number_input("Pression cible (bar)", min_value=100, value=230)
 
-# Simulation
-max_time = 30  # minutes
-step_time = 1  # minute
+# Hypothèses
+debit_nozzle_max = 10 * 60  # 10 Nm3/min = 600 Nm3/h
+debit_compresseur = 800     # Nm3/h
+delai_compresseur = 15      # minutes sans compression
 
-if st.button("🚀 Lancer la simulation"):
+# Calculs
+volume_nm3_par_vehicule = volume_litre_1bar * (pression_cible - pression_depart) / 1000
+debit_total_heure = nb_vehicules * volume_nm3_par_vehicule
+nozzles_requis = int((debit_total_heure / debit_nozzle_max) + 0.999)
+buffer_15min = debit_total_heure * (delai_compresseur / 60)
+compresseurs_requis = int((debit_total_heure / debit_compresseur) + 0.999)
 
-    # Initialisation
-    P_vehicle = 1.0  # bar (atmosphérique)
-    time_series = []
-    P_vehicle_series = []
-    P_LP_series = []
-    P_MP_series = []
-    P_HP_series = []
+# Répartition des banks (LP > MP > HP)
+LP = buffer_15min * 0.5
+MP = buffer_15min * 0.3
+HP = buffer_15min * 0.2
 
-    i = 0
-    while i <= max_time and P_vehicle < P_nozzle_min:
+# Résultats
+st.header("📊 Résultats calculés")
+st.write(f"Volume à injecter par véhicule : **{volume_nm3_par_vehicule:.1f} Nm³**")
+st.write(f"Débit total nécessaire : **{debit_total_heure:.1f} Nm³/h**")
+st.write(f"Nozzles nécessaires : **{nozzles_requis}**")
+st.write(f"Compresseurs nécessaires : **{compresseurs_requis}**")
+st.write(f"Buffer total pour 15 min sans compression : **{buffer_15min:.1f} Nm³**")
 
-        # Choix de la banque active selon la pression disponible
-        active_bank = None
-        if P_LP - P_vehicle >= delta_p_min:
-            active_bank = "LP"
-        elif P_MP - P_vehicle >= delta_p_min:
-            active_bank = "MP"
-        elif P_HP - P_vehicle >= delta_p_min:
-            active_bank = "HP"
-        else:
-            st.warning("❌ Aucune banque n’a suffisamment de pression pour continuer le remplissage.")
-            break
+st.markdown("**🔋 Dimensionnement optimal des banques :**")
+st.write(f"• Bank LP : {LP:.1f} Nm³")
+st.write(f"• Bank MP : {MP:.1f} Nm³")
+st.write(f"• Bank HP : {HP:.1f} Nm³")
 
-        # Transfert de gaz selon la banque
-        transfer_volume = 0.0
-        if active_bank == "LP":
-            delta_P = P_LP - P_vehicle
-            transfer_volume = min((delta_P / P_LP) * V_LP * 0.05, V_LP)
-            P_LP -= (transfer_volume / V_LP) * P_LP
-        elif active_bank == "MP":
-            delta_P = P_MP - P_vehicle
-            transfer_volume = min((delta_P / P_MP) * V_MP * 0.05, V_MP)
-            P_MP -= (transfer_volume / V_MP) * P_MP
-        elif active_bank == "HP":
-            delta_P = P_HP - P_vehicle
-            transfer_volume = min((delta_P / P_HP) * V_HP * 0.05, V_HP)
-            P_HP -= (transfer_volume / V_HP) * P_HP
+# Graphique
+st.header("📈 Graphique de répartition")
+labels = ['LP Bank', 'MP Bank', 'HP Bank']
+volumes = [LP, MP, HP]
 
-        # Mise à jour de la pression véhicule
-        if transfer_volume > 0:
-            P_vehicle += (transfer_volume / V_veh) * P_vehicle * 0.04
-            P_vehicle = min(P_vehicle, P_nozzle_min)
+fig, ax = plt.subplots()
+ax.pie(volumes, labels=labels, autopct='%1.1f%%', startangle=90)
+ax.axis('equal')
+st.pyplot(fig)
 
-        # Enregistrer les valeurs pour le graphique
-        time_series.append(i)
-        P_vehicle_series.append(P_vehicle)
-        P_LP_series.append(P_LP)
-        P_MP_series.append(P_MP)
-        P_HP_series.append(P_HP)
+# PDF export
+st.header("📄 Exporter les résultats en PDF")
 
-        i += step_time
+def export_pdf():
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, "CNG Station Sizing Report", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.ln(5)
 
-    # -------------------- Graphique --------------------
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(time_series, P_vehicle_series, label="🚐 Vehicle", color="blue")
-    ax.plot(time_series, P_LP_series, label="🟧 LP bank", color="orange")
-    ax.plot(time_series, P_MP_series, label="🟩 MP bank", color="green")
-    ax.plot(time_series, P_HP_series, label="🟥 HP bank", color="red")
-    ax.set_xlabel("Temps (min)")
-    ax.set_ylabel("Pression (bar)")
-    ax.set_title("📈 Évolution des pressions pendant le remplissage")
-    ax.legend()
-    ax.grid(True)
-    st.pyplot(fig)
+    pdf.cell(0, 10, f"Nombre de véhicules/h : {nb_vehicules}", ln=True)
+    pdf.cell(0, 10, f"Volume moyen véhicule : {volume_litre_1bar} L (1 bar)", ln=True)
+    pdf.cell(0, 10, f"Pression départ : {pression_depart} bar", ln=True)
+    pdf.cell(0, 10, f"Pression cible : {pression_cible} bar", ln=True)
+    pdf.ln(5)
 
-    st.success("✅ Simulation terminée.")
+    pdf.cell(0, 10, f"Volume par véhicule : {volume_nm3_par_vehicule:.1f} Nm³", ln=True)
+    pdf.cell(0, 10, f"Débit total : {debit_total_heure:.1f} Nm³/h", ln=True)
+    pdf.cell(0, 10, f"Nozzles requis : {nozzles_requis}", ln=True)
+    pdf.cell(0, 10, f"Compresseurs requis : {compresseurs_requis}", ln=True)
+    pdf.cell(0, 10, f"Buffer 15min : {buffer_15min:.1f} Nm³", ln=True)
+    pdf.ln(5)
+
+    pdf.cell(0, 10, f"LP Bank : {LP:.1f} Nm³", ln=True)
+    pdf.cell(0, 10, f"MP Bank : {MP:.1f} Nm³", ln=True)
+    pdf.cell(0, 10, f"HP Bank : {HP:.1f} Nm³", ln=True)
+
+    # Sauvegarde en mémoire
+    buf = io.BytesIO()
+    pdf.output(buf)
+    st.download_button("📥 Télécharger le PDF", buf.getvalue(), "cng_sizing_report.pdf", mime="application/pdf")
+
+export_pdf()
